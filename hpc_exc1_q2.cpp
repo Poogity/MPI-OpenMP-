@@ -312,43 +312,37 @@ void write_density_mpi_vis(Diffusion2D* D2D, char* filename, int rank, int procs
 void write_density_mpi(Diffusion2D* D2D, char* filename, int rank, int procs)
 {  
     // TODO: add your MPI I/O code here, write rho_ to disk
-    int N_ = D2D->N_;
     int real_N_ = D2D->real_N_;
     int local_N_ = D2D->local_N_;
     double* rho_ = D2D->rho_ + real_N_; // starting from row 1, not 0 like sequential code
 
     const int nlocal = local_N_*real_N_;
-    //printf("%d\n", nlocal);
     MPI_File f;
     MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &f);
     MPI_File_set_size(f, 0);
     MPI_Offset base;
     MPI_File_get_position(f, &base);
 
-    MPI_Status status; // every rank writes first its number of doubles
-
     MPI_Offset len = nlocal * sizeof(double);
     MPI_Offset offset=0;
-    MPI_Exscan(&len, &offset, 1, MPI_OFFSET, MPI_SUM, MPI_COMM_WORLD); // necessary exscan operation
+    MPI_Exscan(&len, &offset, 1, MPI_OFFSET, MPI_SUM, MPI_COMM_WORLD); 
+    MPI_Status status;
     MPI_File_write_at_all(f, base+offset, rho_, nlocal, MPI_DOUBLE, &status);
     
 }
-void write_density_mpi_compressed(Diffusion2D* D2D, char* filename)
+void write_density_mpi_prealloc(Diffusion2D* D2D, char* filename)
 {
 
-    // TODO: add your data compression + MPI I/O code here, write compressed rho_ to disk
-    int N_ = D2D->N_;
     int real_N_ = D2D->real_N_;
     int local_N_ = D2D->local_N_;
     double* rho_ = D2D->rho_ + real_N_; // starting from row 1, not 0 like sequential code
 
     const int nlocal = local_N_ * real_N_;
-    //printf("%d\n", nlocal);
     MPI_File f;
     MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &f);
     
     MPI_Offset ntotal = 0;
-    MPI_Offset nbytes = nlocal * sizeof(double); //total bytes per rank
+    MPI_Offset nbytes = nlocal * sizeof(double); 
 
     MPI_Allreduce(&nbytes, &ntotal, 1, MPI_OFFSET, MPI_SUM, MPI_COMM_WORLD);
     MPI_File_preallocate(f, ntotal);
@@ -362,6 +356,12 @@ void write_density_mpi_compressed(Diffusion2D* D2D, char* filename)
     MPI_Status status;
 
     MPI_File_write_at_all(f, base + offset, rho_, nlocal, MPI_DOUBLE, &status);
+}
+void write_density_mpi_compressed(Diffusion2D* D2D, char* filename)
+{
+
+    // TODO: add your data compression + MPI I/O code here, write compressed rho_ to disk
+   
 }
 
 
@@ -437,4 +437,4 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-//  mpiexec -n 4 hpc_exc1_q2.exe 1 1 128 50000 0.00001
+//  mpiexec -n 4 hpc_exc1_q2.exe 1 1 1 50000 0.00001

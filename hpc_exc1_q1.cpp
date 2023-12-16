@@ -28,51 +28,54 @@ int main(int argc, char** argv) {
 	if (argc == 2)
 		n = atoi(argv[1]);
 
-	const unsigned int local_m = n;
 
 	const unsigned int start = n * rank / size;
 	const unsigned int end = n * (rank + 1) / size;
 	const unsigned int local_n = end - start;
 	const unsigned int jstart = 0;
-	const int alignment = 8;
+	const int alignment = 32;
 
-	// allocate memory
-	double* A = (double*)_aligned_malloc(local_n * local_m * sizeof(double), alignment);
+	// allocate memory (aligned)
+	double* A = (double*)_aligned_malloc(local_n * n * sizeof(double), alignment);
 	double* v = (double*)_aligned_malloc(local_n * sizeof(double), alignment);
-	double* w = (double*)_aligned_malloc(local_m * sizeof(double), alignment);
+	double* w = (double*)_aligned_malloc(n * sizeof(double), alignment);
 
-	double simd_time_start = omp_get_wtime();
+	double init_time_start = omp_get_wtime();
 
-	/// init A_ij = (i + 2*j) / n^2
+//#pragma omp simd collapse(2)
 #pragma omp parallel for collapse(2)
+	/// init A_ij = (i + 2*j) / n^2
 	for (int i = 0; i < local_n; ++i)
-		for (int j = 0; j < local_m; ++j)
-			A[i * local_m + j] = ((i+start) + 2.0 * (j+jstart)) / (n * n);
+		for (int j = 0; j < n; ++j)
+			A[i * n + j] = ((i+start) + 2.0 * (j+jstart)) / (n * n);
+
+//#pragma omp simd
 #pragma omp parallel for
 	/// init v_i = 1 + 2 / (i+0.5)
 	for (int i = 0; i < local_n; ++i)
 		v[i] = 1.0 + 2.0 / (i+start + 0.5);
+
+//#pragma omp simd
 #pragma omp parallel for
 	/// init w_i = 1 - i / (3.*n)
-	for (int j = 0; j < local_m; ++j)
+	for (int j = 0; j < n; ++j)
 		w[j] = 1.0 - (j+jstart) / (3.0 * n);
-	double simd_time_end = omp_get_wtime();
-	// printf("Time to initialize values: %f\n", simd_time_end - simd_time_start);
+	double init_time_end = omp_get_wtime();
+
+	if(rank==0) printf("Time to initialize values: %f\n", init_time_end - init_time_start);
 
 	/// compute
 	double start_time, end_time;
-	double local_start_time = MPI_Wtime();
 	double local_result = 0;
+	double local_start_time = MPI_Wtime();
 
-	//double * global_v = (double*)malloc(n * sizeof(double));
-	//MPI_Allgather(v, local_n, MPI_DOUBLE, global_v,local_n, MPI_DOUBLE, MPI_COMM_WORLD);
-
+//#pragma omp simd collapse(2) reduction(+: local_result)
 #pragma omp parallel for collapse(2) reduction(+: local_result)
-	for (int i = 0; i < local_n; ++i) {
-		for (int j = 0; j < local_m; ++j) {
-			local_result += v[i] * A[i * local_m + j] * w[j];
-		}
-	}
+	for (int i = 0; i < local_n; ++i) 
+		for (int j = 0; j < n; ++j) 
+			local_result += v[i] * A[i * n + j] * w[j];
+		
+	
 	double result;
 	MPI_Reduce(&local_result, &result, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 	double local_end_time = MPI_Wtime();
@@ -81,8 +84,8 @@ int main(int argc, char** argv) {
 	MPI_Reduce(&local_start_time, &start_time, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
 	//get last thread finish time
 	MPI_Reduce(&local_end_time, &end_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+	
 	if (rank == 0) {
-		//double result = quadratic_form_reduction(A, v, w, n, MPI_COMM_WORLD);
 		printf("Result = %lf\n", result);
 
 		printf("Total MPI Processes: %d\n", size);
